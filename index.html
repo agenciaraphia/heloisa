@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://drive.google.com">
-  <link rel="preconnect" href="https://lh3.googleusercontent.com" crossorigin>
+  <link rel="preconnect" href="https://lh3.googleusercontent.com">
   <link href="https://fonts.googleapis.com/css2?family=Audiowide&family=Monoton&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
@@ -137,8 +137,8 @@
     .lb-stage { position: relative; flex: 1; width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; }
     .lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px; border: 2px solid var(--cyan); box-shadow: 0 0 30px rgba(34, 227, 255, .5), 0 0 70px rgba(255, 46, 151, .35); opacity: 0; transition: opacity .25s ease; }
     .lb-stage img.loaded { opacity: 1; }
-    .lb-spin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; color: var(--text); font-size: 13px; pointer-events: none; }
-    .lb-ring { width: 38px; height: 38px; border-radius: 50%; border: 4px solid rgba(34, 227, 255, .2); border-top-color: var(--pink); animation: spin .8s linear infinite; }
+    .lb-spin { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 2; display: flex; align-items: center; gap: 10px; padding: 7px 14px; border-radius: 99px; background: rgba(8, 2, 20, .8); border: 1px solid var(--line); color: var(--text); font-size: 12px; white-space: nowrap; pointer-events: none; }
+    .lb-ring { width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(34, 227, 255, .25); border-top-color: var(--pink); animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .lb-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; max-width: 760px; padding-top: 16px; color: var(--text); }
     .lb-title { font: 400 12px 'Audiowide', sans-serif; letter-spacing: .08em; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -258,12 +258,15 @@
       MAX_SELECAO: 30,                            // use o mesmo valor do Code.gs
       API_URL: 'https://script.google.com/macros/s/AKfycbzEb5G9rPHe09AezpzopYHL9dDC-cYXoKeGRmVu9Flnpy2XYAIdMxa9-ymqYdk9lsPo/exec',
       THUMB: 'w400',                              // tamanho das miniaturas
-      FULL: 'w1600'                               // tamanho da foto ampliada
+      FULL: 'w1280'                               // tamanho da foto ampliada
     };
     // ====================================================
 
     const PAGE = 48;
     const MAX_RETRIES = 2;
+    // No celular as miniaturas são menores, o que acelera bastante o carregamento.
+    const THUMB_SIZE = window.innerWidth < 760 ? 'w300' : CONFIG.THUMB;
+    let lbToken = 0;
     const STORAGE_KEY = 'selecao_' + CONFIG.CLIENTE.toLowerCase().replace(/[^a-z0-9]+/g, '_');
 
     let all = [];
@@ -310,8 +313,21 @@
       return String(value || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
     }
 
+    // Primeira tentativa pelo endereço direto de imagens do Google (mais rápido, sem redirecionamento).
+    // Se falhar, tenta pelo endereço de miniaturas do Drive.
     function thumbUrl(id, size, attempt) {
-      return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=' + size + (attempt ? '&r=' + attempt : '');
+      if (!attempt) return 'https://lh3.googleusercontent.com/d/' + encodeURIComponent(id) + '=' + size;
+      return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(id) + '&sz=' + size + '&r=' + attempt;
+    }
+
+    // Começa a baixar a versão grande antes de a pessoa pedir.
+    const prefetched = new Map();
+    function prefetch(photo) {
+      if (!photo || prefetched.has(photo.id)) return;
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = thumbUrl(photo.id, CONFIG.FULL, 0);
+      prefetched.set(photo.id, img);
     }
 
     // ---------- seleção ----------
@@ -370,13 +386,13 @@
       img.onerror = () => {
         if (attempt < MAX_RETRIES) {
           attempt++;
-          setTimeout(() => { img.src = thumbUrl(photo.id, CONFIG.THUMB, attempt); }, 900 * attempt);
+          setTimeout(() => { img.src = thumbUrl(photo.id, THUMB_SIZE, attempt); }, 700 * attempt);
         } else {
           placeholder.classList.remove('pulse');
           img.remove();
         }
       };
-      img.src = thumbUrl(photo.id, CONFIG.THUMB, 0);
+      img.src = thumbUrl(photo.id, THUMB_SIZE, 0);
       imageArea.appendChild(img);
     }
 
@@ -404,6 +420,10 @@
       zoom.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
       zoom.addEventListener('click', event => { event.stopPropagation(); openLightbox(indexInFiltered); });
       zoom.addEventListener('keydown', event => event.stopPropagation());
+      // Ao passar o mouse ou encostar o dedo na lupa, a foto grande já começa a baixar.
+      zoom.addEventListener('mouseenter', () => prefetch(photo));
+      zoom.addEventListener('focus', () => prefetch(photo));
+      zoom.addEventListener('touchstart', () => prefetch(photo), { passive: true });
       imageArea.appendChild(zoom);
 
       const meta = document.createElement('div');
@@ -472,19 +492,41 @@
     function showLightboxPhoto() {
       const photo = filtered[lbIndex];
       if (!photo) return;
-      lbRetries = 0;
-      lbImg.classList.remove('loaded');
+      const token = ++lbToken;
       lbImg.alt = 'Fotografia ' + photo.n;
+      $('lbTitle').textContent = 'FOTO ' + String(photo.n).padStart(4, '0') + ' · ' + photo.name;
+      // Mostra na hora a miniatura que já está no navegador e troca pela versão grande quando ela chegar.
+      lbImg.src = thumbUrl(photo.id, THUMB_SIZE, 0);
+      lbImg.classList.add('loaded');
       lbSpin.style.display = 'flex';
       lbSpin.querySelector('.lb-ring').style.display = '';
-      lbSpinText.textContent = 'Carregando foto…';
-      $('lbTitle').textContent = 'FOTO ' + String(photo.n).padStart(4, '0') + ' · ' + photo.name;
-      lbImg.src = thumbUrl(photo.id, CONFIG.FULL, 0);
+      lbSpinText.textContent = 'Melhorando a qualidade…';
       lbPrev.disabled = lbIndex <= 0;
       lbNext.disabled = lbIndex >= filtered.length - 1;
       refreshLightbox();
-      const next = filtered[lbIndex + 1];
-      if (next) { const pre = new Image(); pre.src = thumbUrl(next.id, CONFIG.FULL, 0); }
+      loadFull(photo, token, 0);
+      prefetch(filtered[lbIndex + 1]);
+      prefetch(filtered[lbIndex + 2]);
+      prefetch(filtered[lbIndex - 1]);
+    }
+
+    function loadFull(photo, token, attempt) {
+      const big = new Image();
+      big.onload = () => {
+        if (token !== lbToken) return;
+        lbImg.src = big.src;
+        lbSpin.style.display = 'none';
+      };
+      big.onerror = () => {
+        if (token !== lbToken) return;
+        if (attempt < MAX_RETRIES) {
+          setTimeout(() => { if (token === lbToken) loadFull(photo, token, attempt + 1); }, 800 * (attempt + 1));
+        } else {
+          lbSpin.querySelector('.lb-ring').style.display = 'none';
+          lbSpinText.textContent = 'Não foi possível carregar em alta qualidade.';
+        }
+      };
+      big.src = thumbUrl(photo.id, CONFIG.FULL, attempt);
     }
 
     function openLightbox(index) {
@@ -498,6 +540,7 @@
     function closeLightbox() {
       if (lbIndex < 0) return;
       lbIndex = -1;
+      lbToken++;
       lb.classList.remove('open');
       document.body.style.overflow = '';
       lbImg.removeAttribute('src');
@@ -510,19 +553,7 @@
       showLightboxPhoto();
     }
 
-    lbImg.addEventListener('load', () => { lbImg.classList.add('loaded'); lbSpin.style.display = 'none'; });
-    lbImg.addEventListener('error', () => {
-      if (lbIndex < 0 || !lbImg.getAttribute('src')) return;
-      const photo = filtered[lbIndex];
-      if (photo && lbRetries < MAX_RETRIES) {
-        lbRetries++;
-        setTimeout(() => { if (filtered[lbIndex] === photo) lbImg.src = thumbUrl(photo.id, CONFIG.FULL, lbRetries); }, 900 * lbRetries);
-      } else {
-        lbSpin.style.display = 'flex';
-        lbSpin.querySelector('.lb-ring').style.display = 'none';
-        lbSpinText.textContent = 'Não foi possível carregar esta foto.';
-      }
-    });
+    lbImg.addEventListener('load', () => { lbImg.classList.add('loaded'); });
     $('lbClose').addEventListener('click', closeLightbox);
     lbPrev.addEventListener('click', () => stepLightbox(-1));
     lbNext.addEventListener('click', () => stepLightbox(1));
